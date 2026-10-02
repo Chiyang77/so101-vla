@@ -1,0 +1,23 @@
+# Third-party repos (cloned separately; our changes live in assets/ and patches/)
+mujoco_menagerie/
+lerobot/
+
+# Training outputs and model weights (large; regenerate by training)
+outputs/
+*.pt
+*.pth
+*.safetensors
+*_stats.npz
+
+# Recorded datasets (large; LeRobot datasets live in ~/.cache/huggingface/lerobot)
+demos/
+demos_vision/
+
+# Logs, debug dumps, caches
+*.log
+MJDATA.TXT
+__pycache__/
+*.pyc
+
+# Local tool settings
+.claude/settings.local.json

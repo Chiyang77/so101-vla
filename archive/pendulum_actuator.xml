@@ -1,0 +1,36 @@
+<mujoco model = "pendulum_actuator">
+    <option gravity = "0 0 -9.81" />
+
+    <worldbody>
+        <light pos = "0 0 3" dir="0 0 -1"/>
+        <geom name = "floor" type = "plane" size = "2 2 0.1" rgba="0.8 0.9 0.8 1"/>
+        
+        <body name = "anchor" pos = "0 0 1.5">
+            <geom type = "sphere" size= "0.05" rgba = "0.3 0.3 0.3 1"/>
+            
+            <body name = "link1" pos = "0 0 0">
+                <joint name = "hinge1" type = "hinge" axis = "0 1 0" damping = "0.1"/>
+                <geom type = "capsule" fromto="0 0 0 0 0 -0.5" size = "0.04" rgba = "0.8 0.2 0.2 1"/>
+
+                <body name="link2" pos = "0 0 -0.5">
+                    <joint name = "hinge2" type = "hinge" axis = "0 1 0" damping = "0.1" />
+                    <geom type = "capsule" fromto = "0 0 0 0 0 -0.5" size = "0.04" rgba = "0.2 0.4 0.9 1"/>
+                    <geom type="sphere" pos = "0 0 -0.5" size = "0.07" rgba ="1 0.8 0 1" />
+                    <site name="tip" pos="0 0 -0.5"/> 
+                </body>
+            </body>
+        </body>
+    </worldbody>
+
+
+    <actuator>
+    <motor joint="hinge1" gear="5" ctrllimited="true" ctrlrange="-1 1"/>
+    <motor joint="hinge2" gear="5" ctrllimited="true" ctrlrange="-1 1"/>
+    </actuator>
+
+
+    <keyframe>
+        <key name = "start" qpos = "1.2 -0.8"/>
+    </keyframe>
+
+</mujoco>

@@ -1,0 +1,14 @@
+
+
+python -m lerobot.teleoperate --robot.type=so101_follower --robot.port=COM24 --robot.id=my_awesome_follower_arm --robot.cameras="{ fixed: {type: opencv, index_or_path: 1, width: 640, height: 480, fps: 30}, handeye: {type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30}}" --teleop.type=so101_leader --teleop.port=COM22 --teleop.id=my_awesome_leader_arm --display_data=true
+
+lerobot-calibrate --robot.type=so101_follower --robot.port=COM24 --robot.id=my_awesome_follower_arm
+
+lerobot-calibrate --teleop.type=so101_leader --teleop.port=COM22 --teleop.id=my_awesome_leader_arm
+
+
+python -m lerobot.record --robot.type=so101_follower --robot.port=COM24 --robot.id=my_awesome_follower_arm --robot.cameras="{ fixed:{type: opencv, index_or_path: 1, width: 640, height: 480, fps: 30} , handeye:{type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30} }" --teleop.type=so101_leader --teleop.port=COM22 --teleop.id=my_awesome_leader_arm --display_data=true --dataset.repo_id=local/so101_ball_v2 --dataset.push_to_hub=false --dataset.num_episodes=30 --dataset.single_task="Pick up the red ball and place it on the green circle"
+
+lerobot-train --dataset.repo_id=local/so101_ball_v2 --dataset.image_transforms.enable=true --policy.type=act --policy.device=cuda --policy.push_to_hub=false --output_dir=outputs/train/act_so101_ball_v2 --job_name=act_so101_ball_v2 --wandb.enable=false
+
+python -m lerobot.record --robot.type=so101_follower --robot.port=COM24 --robot.id=my_awesome_follower_arm --robot.cameras="{ fixed:{type: opencv, index_or_path: 1, width: 640, height: 480, fps: 30}, handeye:{type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30} }" ----policy.path=outputs/train/act_so101_ball_v2/checkpoints/last/pretrained_model --policy.n_action_steps=25 --policy.device=cuda --dataset.repo_id=local/eval_so101_ball_v3 --dataset.push_to_hub=false --dataset.num_episodes=10 --dataset.single_task="Pick up the red ball and place it on the green circle" --display_data=true

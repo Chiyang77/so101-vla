@@ -1,0 +1,241 @@
+diff --git a/src/lerobot/cameras/utils.py b/src/lerobot/cameras/utils.py
+index 1eb69840..145e40b2 100644
+--- a/src/lerobot/cameras/utils.py
++++ b/src/lerobot/cameras/utils.py
+@@ -60,6 +60,7 @@ def get_cv2_backend() -> int:
+     import cv2
+ 
+     if platform.system() == "Windows":
++        return cv2.CAP_DSHOW
+         return cv2.CAP_MSMF  # Use MSMF for Windows instead of AVFOUNDATION
+     # elif platform.system() == "Darwin":  # macOS
+     #     return cv2.CAP_AVFOUNDATION
+diff --git a/src/lerobot/configs/policies.py b/src/lerobot/configs/policies.py
+index f5fa727c..542bac35 100644
+--- a/src/lerobot/configs/policies.py
++++ b/src/lerobot/configs/policies.py
+@@ -12,14 +12,13 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ import abc
+-import builtins
+ import json
+ import logging
+ import os
+ import tempfile
+ from dataclasses import dataclass, field
+ from pathlib import Path
+-from typing import TypeVar
++from typing import Type, TypeVar
+ 
+ import draccus
+ from huggingface_hub import hf_hub_download
+@@ -27,12 +26,12 @@ from huggingface_hub.constants import CONFIG_NAME
+ from huggingface_hub.errors import HfHubHTTPError
+ 
+ from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
+-from lerobot.constants import ACTION, OBS_STATE
+ from lerobot.optim.optimizers import OptimizerConfig
+ from lerobot.optim.schedulers import LRSchedulerConfig
+ from lerobot.utils.hub import HubMixin
+ from lerobot.utils.utils import auto_select_torch_device, is_amp_available, is_torch_device_available
+ 
++# Generic variable that is either PreTrainedConfig or a subclass thereof
+ T = TypeVar("T", bound="PreTrainedConfig")
+ 
+ 
+@@ -63,6 +62,9 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):
+     # automatic gradient scaling is used.
+     use_amp: bool = False
+ 
++    # added by Sachin-2007
++    gradient_accumulation_steps: int = 1
++
+     push_to_hub: bool = True
+     repo_id: str | None = None
+ 
+@@ -120,8 +122,8 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):
+ 
+     @property
+     def robot_state_feature(self) -> PolicyFeature | None:
+-        for ft_name, ft in self.input_features.items():
+-            if ft.type is FeatureType.STATE and ft_name == OBS_STATE:
++        for _, ft in self.input_features.items():
++            if ft.type is FeatureType.STATE:
+                 return ft
+         return None
+ 
+@@ -138,8 +140,8 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):
+ 
+     @property
+     def action_feature(self) -> PolicyFeature | None:
+-        for ft_name, ft in self.output_features.items():
+-            if ft.type is FeatureType.ACTION and ft_name == ACTION:
++        for _, ft in self.output_features.items():
++            if ft.type is FeatureType.ACTION:
+                 return ft
+         return None
+ 
+@@ -149,17 +151,17 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):
+ 
+     @classmethod
+     def from_pretrained(
+-        cls: builtins.type[T],
+-        pretrained_name_or_path: str | Path,
+-        *,
+-        force_download: bool = False,
+-        resume_download: bool = None,
+-        proxies: dict | None = None,
+-        token: str | bool | None = None,
+-        cache_dir: str | Path | None = None,
+-        local_files_only: bool = False,
+-        revision: str | None = None,
+-        **policy_kwargs,
++            cls: Type[T],
++            pretrained_name_or_path: str | Path,
++            *,
++            force_download: bool = False,
++            resume_download: bool = None,
++            proxies: dict | None = None,
++            token: str | bool | None = None,
++            cache_dir: str | Path | None = None,
++            local_files_only: bool = False,
++            revision: str | None = None,
++            **policy_kwargs,
+     ) -> T:
+         model_id = str(pretrained_name_or_path)
+         config_file: str | None = None
+@@ -197,11 +199,16 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):
+             config = json.load(f)
+ 
+         config.pop("type")
+-        with tempfile.NamedTemporaryFile("w+") as f:
++
++        # Create temporary file and ensure it's closed before draccus reads it (Windows fix)
++        with tempfile.NamedTemporaryFile("w+", delete=False) as f:
+             json.dump(config, f)
+-            config_file = f.name
+-            f.flush()
++            temp_config_file = f.name
+ 
++        try:
+             cli_overrides = policy_kwargs.pop("cli_overrides", [])
+             with draccus.config_type("json"):
+-                return draccus.parse(orig_config.__class__, config_file, args=cli_overrides)
++                return draccus.parse(orig_config.__class__, temp_config_file, args=cli_overrides)
++        finally:
++            # Clean up the temporary file
++            os.unlink(temp_config_file)
+\ No newline at end of file
+diff --git a/src/lerobot/motors/motors_bus.py b/src/lerobot/motors/motors_bus.py
+index 97830fc3..bc28b53f 100644
+--- a/src/lerobot/motors/motors_bus.py
++++ b/src/lerobot/motors/motors_bus.py
+@@ -1056,7 +1056,7 @@ class MotorsBus(abc.ABC):
+         motors: str | list[str] | None = None,
+         *,
+         normalize: bool = True,
+-        num_retry: int = 0,
++        num_retry: int = 1,
+     ) -> dict[str, Value]:
+         """Read the same register from several motors at once.
+ 
+@@ -1104,7 +1104,7 @@ class MotorsBus(abc.ABC):
+         length: int,
+         motor_ids: list[int],
+         *,
+-        num_retry: int = 0,
++        num_retry: int = 1,
+         raise_on_error: bool = True,
+         err_msg: str = "",
+     ) -> tuple[dict[int, int], int]:
+@@ -1113,7 +1113,7 @@ class MotorsBus(abc.ABC):
+             comm = self.sync_reader.txRxPacket()
+             if self._is_comm_success(comm):
+                 break
+-            logger.debug(
++            logger.info(
+                 f"Failed to sync read @{addr=} ({length=}) on {motor_ids=} ({n_try=}): "
+                 + self.packet_handler.getTxRxResult(comm)
+             )
+@@ -1151,7 +1151,7 @@ class MotorsBus(abc.ABC):
+         values: Value | dict[str, Value],
+         *,
+         normalize: bool = True,
+-        num_retry: int = 0,
++        num_retry: int = 1,
+     ) -> None:
+         """Write the same register on multiple motors.
+ 
+@@ -1192,7 +1192,7 @@ class MotorsBus(abc.ABC):
+         addr: int,
+         length: int,
+         ids_values: dict[int, int],
+-        num_retry: int = 0,
++        num_retry: int = 1,
+         raise_on_error: bool = True,
+         err_msg: str = "",
+     ) -> int:
+@@ -1201,7 +1201,7 @@ class MotorsBus(abc.ABC):
+             comm = self.sync_writer.txPacket()
+             if self._is_comm_success(comm):
+                 break
+-            logger.debug(
++            logger.info(
+                 f"Failed to sync write @{addr=} ({length=}) with {ids_values=} ({n_try=}): "
+                 + self.packet_handler.getTxRxResult(comm)
+             )
+diff --git a/src/lerobot/record.py b/src/lerobot/record.py
+index 09fa33fe..28364455 100644
+--- a/src/lerobot/record.py
++++ b/src/lerobot/record.py
+@@ -58,6 +58,7 @@ lerobot-record \
+ """
+ 
+ import logging
++import os
+ import time
+ from dataclasses import asdict, dataclass
+ from pathlib import Path
+@@ -247,6 +248,12 @@ def record_loop(
+                 robot_type=robot.robot_type,
+             )
+             action = {key: action_values[i].item() for i, key in enumerate(robot.action_features)}
++            # GRIPPER_SNAP="threshold,closed,open": a policy trained on binary gripper labels
++            # hedges near the grasp (outputs in between), so snap its output to the two states.
++            snap = os.environ.get("GRIPPER_SNAP")
++            if snap and "gripper.pos" in action:
++                thr, closed, opened = (float(v) for v in snap.split(","))
++                action["gripper.pos"] = closed if action["gripper.pos"] < thr else opened
+         elif policy is None and isinstance(teleop, Teleoperator):
+             action = teleop.get_action()
+         elif policy is None and isinstance(teleop, list):
+diff --git a/src/lerobot/utils/train_utils.py b/src/lerobot/utils/train_utils.py
+index 2859fe05..d46578a4 100644
+--- a/src/lerobot/utils/train_utils.py
++++ b/src/lerobot/utils/train_utils.py
+@@ -60,11 +60,23 @@ def load_training_step(save_dir: Path) -> int:
+ 
+ 
+ def update_last_checkpoint(checkpoint_dir: Path) -> Path:
++    import os
++
+     last_checkpoint_dir = checkpoint_dir.parent / LAST_CHECKPOINT_LINK
+     if last_checkpoint_dir.is_symlink():
+         last_checkpoint_dir.unlink()
++    elif last_checkpoint_dir.is_dir():
++        # Windows junction fallback from a previous save; rmdir removes only the link
++        os.rmdir(last_checkpoint_dir)
+     relative_target = checkpoint_dir.relative_to(checkpoint_dir.parent)
+-    last_checkpoint_dir.symlink_to(relative_target)
++    try:
++        last_checkpoint_dir.symlink_to(relative_target)
++    except OSError:
++        # Windows without Developer Mode cannot create symlinks (WinError 1314),
++        # but directory junctions need no privilege and read the same way.
++        import _winapi
++
++        _winapi.CreateJunction(str(checkpoint_dir.resolve()), str(last_checkpoint_dir))
+ 
+ 
+ def save_checkpoint(
