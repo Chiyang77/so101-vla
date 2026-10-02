@@ -4,6 +4,17 @@ Goal: get hands-on with physics-AI / VLA by simulating in MuJoCo first, then dep
 
 End state: a language-conditioned policy (e.g. ACT, Diffusion Policy, or a small VLA) that we trained in sim, transferred to a real SO-101, and can demo doing pick-and-place from natural-language commands.
 
+## Status at a glance (Oct 2026)
+| Phase | Status | Result |
+|---|---|---|
+| 1 — MuJoCo fundamentals | ✅ Done | |
+| 2 — SO-101 in sim + IK | ✅ Done | `mink` IK |
+| 3 — Scripted pick-and-place + Gym env | ✅ Done | expert 97–99% |
+| 4 — Imitation learning (state) | ✅ Done | hand-rolled ACT 86.7% |
+| 4b — Vision policy (sim) | ✅ Done | dual-camera ACT 80.0% |
+| 5 — Real SO-101 | ✅ Exit met (demo video pending) | LeRobot ACT 7/10 real pick-place |
+| 6 — Isaac Lab / VLA (stretch) | Not started | |
+
 ## Stack we want exposure to
 - **MuJoCo** (CPU sim, MJCF, viewer) — primary physics engine
 - **MuJoCo MJX** (JAX, GPU-parallel) — scale up training
@@ -12,7 +23,7 @@ End state: a language-conditioned policy (e.g. ACT, Diffusion Policy, or a small
 
 ---
 
-## Phase 1 — MuJoCo fundamentals (1–2 weeks) ← we are here
+## Phase 1 — MuJoCo fundamentals (1–2 weeks) ✅ DONE
 - Install `mujoco` Python bindings; confirm with a "hello world" script.
 - Run the interactive viewer (`python -m mujoco.viewer`) on a hand-written MJCF.
 - Work through the official DeepMind MuJoCo tutorial colabs (concepts: MJCF, `mjModel` vs `mjData`, joints, actuators, contacts, sensors).
@@ -20,7 +31,7 @@ End state: a language-conditioned policy (e.g. ACT, Diffusion Policy, or a small
 
 Exit criterion: I can write an MJCF from scratch, simulate it, render it, and read state out of `mjData` in Python.
 
-## Phase 2 — Drive the SO-101 in sim (1 week)
+## Phase 2 — Drive the SO-101 in sim (1 week) ✅ DONE
 - Clone `mujoco_menagerie`, load the `trs_so_arm100` scene.
 - Drive joints with position actuators in the viewer.
 - Add a tabletop with a cube; tune contact/friction.
@@ -28,14 +39,14 @@ Exit criterion: I can write an MJCF from scratch, simulate it, render it, and re
 
 Exit criterion: I can teleport the SO-101 end effector to any reachable point on the table.
 
-## Phase 3 — Scripted pick-and-place + Gym wrapper (1 week)
+## Phase 3 — Scripted pick-and-place + Gym wrapper (1 week) ✅ DONE
 - Add a camera body to the MJCF; render RGB observations.
 - Wrap as a Gymnasium env (`reset`, `step`, observation = image + joint state, action = joint targets).
 - Hand-script a pick-and-place policy that succeeds reliably.
 
 Exit criterion: scripted policy hits 95%+ success on cube pick-and-place; can render demos to MP4.
 
-## Phase 4 — Imitation learning (in progress)
+## Phase 4 — Imitation learning ✅ DONE (86.7%)
 Chose the **imitation/VLA branch** (direct on-ramp to hardware).
 
 Progress so far (hand-rolled PyTorch, no LeRobot yet):
@@ -105,7 +116,7 @@ lerobot_mujoco_sim (MuJoCo+SO101+ACT), StoneT2000/lerobot-sim2real (PPO sim2real
 
 Exit criterion: a learned policy that reliably (~80%+) picks and places in sim.
 
-## Phase 4b — Vision policy (ACT from pixels) — IN PROGRESS
+## Phase 4b — Vision policy (ACT from pixels) ✅ DONE (80.0%)
 Prerequisite for real deployment: the state policy uses privileged sim
 coordinates (cube_pos, target_xy) the real robot can't provide. So swap the
 observation to a CAMERA IMAGE + proprioception.
@@ -140,7 +151,7 @@ perception) -> the fix (wrist close-up view) was targeted, not a guess.
 Levers to push past 80%: pretrained ResNet encoder, more demos, higher-res wrist,
 color-jitter aug (also helps sim-to-real).
 
-## Phase 5 — Real SO-101 (1–2 weeks)
+## Phase 5 — Real SO-101 ✅ EXIT MET (demo video pending)
 - HARDWARE: **Hiwonder SO-ARM101 Advanced Kit, Assembled**. Leader+follower,
   dual cameras (wrist 1080p + external 480p), HX-10HM/HX-30HM 30kg 12V servos
   (register layout claimed identical to Feetech STS3215), BusLinker V3.0 board.
@@ -171,6 +182,30 @@ roll-off; leader gripper drifted across sessions -> label the gripper from the
 follower's MEASURED jaw (3 states: ~45 empty, ~58 holding, 64+ open); with binary
 labels, snap the gripper output at inference. Tools: go_home.py, run_eval.bat,
 relabel_gripper.py, GRIPPER_SNAP env var in lerobot record.py.
+
+Current best: model `act_so101_ball_v7`, trained on `so101_ball_v4` (96 demos,
+gripper relabeled), evaluated with temporal ensembling (coeff 0.01) +
+GRIPPER_SNAP=60,45,75, at night under the recording lamps, from the go_home pose.
+Remaining failures: a missed first grasp followed by retries that drift instead
+of re-centering.
+
+### Phase 5 — remaining steps
+- [ ] Record a demo video (eval_v7 episodes are already saved as videos).
+- [ ] Check the follower gripper motor (it felt off). Calibration is backed up in
+      `calibration_backup/`; if the follower is recalibrated, re-check the gripper
+      thresholds (45 / 62 / 75) and the snap values before trusting v7 again.
+- [ ] Recalibrate the leader gripper with a full sweep before any new recording
+      (its reading drifted across sessions).
+- [ ] Optional robustness: record ~20 daytime demos, or block daylight so
+      lighting always matches training.
+- [ ] Optional: more failed-grasp recovery demos to fix the drifting retries.
+
+### Eval protocol (keep results comparable)
+1. Night, curtains closed, same lamps as recording.
+2. `run_eval.bat` (go_home before every episode; 10 episodes; new EVAL_NAME per model).
+3. Don't touch the scene mid-episode; press → to end an episode, Esc to stop.
+4. Wait for "Map" / "Svt" encoding to finish after each episode — interrupting
+   leaves a half-saved dataset.
 
 ## Phase 6 (stretch) — Isaac Lab / Newton / VLA
 - Port the same scene to Isaac Lab (Newton backend).
